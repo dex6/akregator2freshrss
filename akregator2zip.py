@@ -4,6 +4,7 @@
 
 from __future__ import print_function, division
 
+import cgi
 import codecs
 import json
 import locale
@@ -37,6 +38,8 @@ def u(s):
         s = s.decode('utf-8')
     return s
 
+def uesc(s):
+    return u(cgi.escape(s, True))
 
 def read_feeds_opml():
     """Opens Akregator feedlistbackup archive and returns lxml-parsed OPML xml."""
@@ -136,14 +139,14 @@ def write_feed_json(outline, outnum):
             content = ''
 
         articles.append(OrderedDict([
-            ('id', a.guid),
+            ('id', uesc(a.guid)),
             ('categories', [tag for tag in a.tags]),  # akregator does not seem to support tags, although fields exists in database...
-            ('title', u(a.title)),
-            ('author', u(a.authorName or a.authorEMail)),
+            ('title', uesc(a.title)),
+            ('author', uesc(a.authorName or a.authorEMail)),
             ('published', a.pubDate),
             ('updated', a.pubDate),
             ('alternate', [OrderedDict([
-                ('href', a.link),
+                ('href', uesc(a.link)),
                 ('type', 'text/html'),
             ])]),
             ('content', {
@@ -151,15 +154,15 @@ def write_feed_json(outline, outnum):
             }),
             ('origin', OrderedDict([
                 ('streamId', outnum),
-                ('title', u(feed_title)),
-                ('htmlUrl', html_url),
-                ('feedUrl', feed_url),
+                ('title', uesc(feed_title)),
+                ('htmlUrl', uesc(html_url)),
+                ('feedUrl', uesc(feed_url)),
             ])),
         ]))
 
     dump_data = OrderedDict([
         ('id', 'akregator2zip/dump/feed/{}'.format(outnum)),
-        ('title', u'List of {} articles'.format(feed_title)),
+        ('title', u'List of {} articles'.format(uesc(feed_title))),
         ('author', 'akregator2zip dumper'),
         ('items', articles),
     ])
