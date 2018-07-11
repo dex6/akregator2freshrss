@@ -4,12 +4,15 @@
 
 from __future__ import print_function, division
 
+import sys
+sys.dont_write_bytecode = True
 import cgi
 import codecs
 import json
 import locale
-import sys
 import os
+import shutil
+import tempfile
 import zipfile
 from collections import OrderedDict
 from copy import deepcopy
@@ -28,8 +31,7 @@ from lxml import etree as et
 import metakit
 
 
-ak_archive_path = './Archive'
-output_dir = './out'
+from a2f_config import ak_archive_path, output_zip, temp_dir
 
 
 def u(s):
@@ -39,7 +41,9 @@ def u(s):
     return s
 
 def uesc(s):
+    """Returns unicode basic-HTML-escaped string."""
     return u(cgi.escape(s, True))
+
 
 def read_feeds_opml():
     """Opens Akregator feedlistbackup archive and returns lxml-parsed OPML xml."""
@@ -73,31 +77,34 @@ def extract_feed_nodes(opml):
     return categories
 
 
-def write_freshrss_opml(feedlist):
+def write_freshrss_opml(feedlist, output_dir):
     """Writes FreshRSS-compatible OPML file."""
+    # some stuff that akregator puts in <head>, breaks freshrss importer...
+    # lets rewrite it from a scratch, stripping akregator-specific attrs
     root = et.Element('opml', version='2.0')
 
     head = et.SubElement(root, 'head')
-    et.SubElement(head, 'title').text = 'FreshRSS'
+    et.SubElement(head, 'title').text = 'akregator2zip feed export'
     locale.setlocale(locale.LC_TIME, 'C')
     et.SubElement(head, 'dateCreated').text = datetime.today().strftime('%a, %d %b %Y %H:%M:%S')
 
+    leave_attrs = {'text', 'type', 'xmlUrl', 'htmlUrl', 'description', 'version'}
     body = et.SubElement(root, 'body')
-    for category, outlines in feedlist.items():
+    for category, outlines in feedlist.iteritems():
         outline_parent = et.SubElement(body, 'outline', text=category)
         for outline in outlines:
             outline_tag = deepcopy(outline)
-            leave_attrs = {'text', 'type', 'xmlUrl', 'htmlUrl', 'description', 'version'}
-            for attr in list(outline_tag.attrib.keys()):
+            for attr in list(outline_tag.attrib):
                 if attr not in leave_attrs:
                     del outline_tag.attrib[attr]
             outline_parent.append(outline_tag)
 
-    with open(os.path.join(output_dir, 'feeds-akregator-export.opml'), 'w') as f:
+    with open(os.path.join(output_dir, 'feeds_akregator_export.opml'), 'w') as f:
         f.write(et.tostring(root, encoding='utf-8', xml_declaration=True, pretty_print=True))
 
 
-def write_feed_json(outline, outnum):
+def write_feed_json(outline, outnum, output_dir):
+    """Writes articles from specified feed (outline) into a JSON file."""
     articles = []
     feed_url = outline.get('xmlUrl')
     html_url = outline.get('htmlUrl')
@@ -174,29 +181,39 @@ def write_feed_json(outline, outnum):
     return article_cnt
 
 
-def compress_zipfile():
-    with zipfile.ZipFile('out.zip', 'w', zipfile.ZIP_DEFLATED) as zipf:
+def compress_zipfile(output_dir):
+    """Compress files from output_dir into output_zip file."""
+    with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for fname in os.listdir(output_dir):
             fpath = os.path.join(output_dir, fname)
             zipf.write(fpath, fname)
 
 
-opml = read_feeds_opml()
-feedlist = extract_feed_nodes(opml)
+def main():
+    opml = read_feeds_opml()
+    feedlist = extract_feed_nodes(opml)
 
-write_freshrss_opml(feedlist)
+    output_dir = tempfile.mkdtemp(prefix='akregator2freshrss_tmp', dir=temp_dir)
+    try:
+        write_freshrss_opml(feedlist, output_dir)
 
-i = 0
-total_articles = 0
-for category, outlines in feedlist.items():
-    for outline in outlines:
-        i += 1
-        print(u"Converting #{} '{}'... ".format(i, outline.get('title')), end='')
-        sys.stdout.flush()
-        article_cnt = write_feed_json(outline, i)
-        total_articles += article_cnt
-        print("{} articles exported".format(article_cnt))
+        i = 0
+        total_articles = 0
+        for category, outlines in feedlist.iteritems():
+            for outline in outlines:
+                i += 1
+                print(u"Converting #{} '{}'... ".format(i, outline.get('title')), end='')
+                sys.stdout.flush()
+                article_cnt = write_feed_json(outline, i, output_dir)
+                total_articles += article_cnt
+                print("{} articles exported".format(article_cnt))
 
-print("DONE, zipping {} articles...".format(total_articles))
-compress_zipfile()
-print("DONE!")
+        print("DONE, zipping {} articles...".format(total_articles))
+        compress_zipfile(output_dir)
+        print("DONE!")
+    finally:
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+
+if __name__ == '__main__':
+    main()
