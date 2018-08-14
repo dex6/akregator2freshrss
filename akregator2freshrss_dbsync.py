@@ -95,8 +95,15 @@ def update_feed_settings(feedlist):
                 print(u"Successfully updated feed settings for {}".format(outline.get('title')))
                 updates += 1
             else:
-                print(u"ERROR: failed to update feed settings for {} (feed not found in FreshRSS database)".format(outline.get('title')))
-                fails += 1
+                # not found? FreshRSS maybe updated feed url. Retry by feed title and website url
+                found_rows = c.execute('UPDATE ' + feed_table + ' SET keep_history=%s, ttl=%s, attributes=%s WHERE name=%s AND website=%s',
+                                       data[:3] + (uesc(outline.get('title')), uesc(outline.get('htmlUrl'))))
+                if found_rows:
+                    print(u"Successfully updated (with retry) feed settings for {}".format(outline.get('title')))
+                    updates += 1
+                else:
+                    print(u"ERROR: failed to update feed settings for {} (feed not found in FreshRSS database)".format(outline.get('title')))
+                    fails += 1
 
     c.close()
     frdb.commit()
@@ -143,9 +150,14 @@ def update_article_status(feedlist):
             c.execute('SELECT id FROM ' + feed_table + ' WHERE url=%s', (uesc(outline.get('xmlUrl')),))
             row = c.fetchone()
             if not row:
-                print(u"ERROR: feed '{}' ({}) not found in FreshRSS database".format(outline.get('title'), outline.get('xmlUrl')))
-                fail_count += 1
-                continue
+                # not found? FreshRSS maybe updated feed url. Retry by feed title and website url
+                c.execute('SELECT id FROM ' + feed_table + ' WHERE name=%s AND website=%s',
+                          (uesc(outline.get('title')), uesc(outline.get('htmlUrl'))))
+                row = c.fetchone()
+                if not row:
+                    print(u"ERROR: feed '{}' ({}) not found in FreshRSS database".format(outline.get('title'), outline.get('xmlUrl')))
+                    fail_count += 1
+                    continue
 
             feed_id = row[0]
             stats = update_feed_articles(outline, feed_id)
