@@ -105,15 +105,28 @@ def write_freshrss_opml(feedlist, output_dir):
 
 def write_feed_json(outline, outnum, output_dir):
     """Writes articles from specified feed (outline) into a JSON file."""
-    articles = []
+    articles = OrderedDict()
     feed_url = outline.get('xmlUrl')
     html_url = outline.get('htmlUrl')
     feed_title = outline.get('title')
     feed_file = feed_url.replace(':', '_').replace('/', '_') + '.mk4'
     fdb = metakit.storage(os.path.join(ak_archive_path, feed_file), 0)
-    vw = fdb.getas(fdb.description())
-    article_cnt = len(vw)
-    for a in vw:
+    for a in fdb.getas(fdb.description()):
+        # skip articles marked as "deleted" or "thrash"
+        if a.status & 0x3:
+            continue
+
+        # If article guid is a hash, then it means that feed XML does not specify a guid value.
+        # Akregator does and keeps a hash value, but FreshRSS uses article link.
+        # Convert to avoid duplicate entries when feed is fetched by FreshRSS.
+        guid = a.link if a.guid.startswith('hash:') else a.guid
+
+        # if guid is duplicate, drop the old article (we are iterating from older to newer;
+        # so the new one should take precedence, but in case of duplicated guids in JSON
+        # FreshRSS would import first and ignore all following entries...)
+        articles.pop(guid, None)
+
+        # format article enclosure for appending to contents just like FreshRSS does
         if a.hasEnclosure:
             enclosure = ['\n<div class="enclosure">']
             if a.enclosureType.startswith('video/') or a.enclosureType.startswith('audio/'):
@@ -140,13 +153,14 @@ def write_feed_json(outline, outnum, output_dir):
         else:
             enclosure = ''
 
+        # format article content
         if a.content or a.description or enclosure:
             content = '\n' + (a.content or a.description) + enclosure + '\n'
         else:
             content = ''
 
-        articles.append(OrderedDict([
-            ('id', uesc(a.guid)),
+        articles[guid] = OrderedDict([
+            ('id', uesc(guid)),
             ('categories', [tag for tag in a.tags]),  # akregator does not seem to support tags, although fields exists in database...
             ('title', uesc(a.title)),
             ('author', uesc(a.authorName or a.authorEMail)),
@@ -165,26 +179,26 @@ def write_feed_json(outline, outnum, output_dir):
                 ('htmlUrl', uesc(html_url)),
                 ('feedUrl', uesc(feed_url)),
             ])),
-        ]))
+        ])
 
     dump_data = OrderedDict([
         ('id', 'akregator2zip/dump/feed/{}'.format(outnum)),
         ('title', u'List of {} articles'.format(uesc(feed_title))),
         ('author', 'akregator2zip dumper'),
-        ('items', articles),
+        ('items', list(articles.itervalues())),
     ])
 
-    dump_file = 'feed_{}_{}.json'.format(datetime.today().strftime('%Y-%m-%d'), outnum)
+    dump_file = 'feed_{}_{:04d}.json'.format(datetime.today().strftime('%Y-%m-%d'), outnum)
     with codecs.open(os.path.join(output_dir, dump_file), 'w', 'utf-8') as f:
         json.dump(dump_data, f, ensure_ascii=False, indent=4, separators=(',', ': '))
 
-    return article_cnt
+    return len(articles)
 
 
 def compress_zipfile(output_dir):
     """Compress files from output_dir into output_zip file."""
     with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for fname in os.listdir(output_dir):
+        for fname in sorted(os.listdir(output_dir)):
             fpath = os.path.join(output_dir, fname)
             zipf.write(fpath, fname)
 
@@ -210,7 +224,7 @@ def main():
 
         print("DONE, zipping {} articles...".format(total_articles))
         compress_zipfile(output_dir)
-        print("DONE!")
+        print("DONE: {}".format(output_zip))
     finally:
         shutil.rmtree(output_dir, ignore_errors=True)
 

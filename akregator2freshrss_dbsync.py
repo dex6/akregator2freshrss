@@ -128,10 +128,13 @@ def update_article_status(feedlist):
         updates, fails = 0, 0
         for a in fdb.getas(fdb.description()):
             # Akregator status bits: Deleted = 0x01, Trash = 0x02, New = 0x04, Read = 0x08, Keep = 0x10
+            if a.status & 0x3:
+                continue  # skip articled marked as "deleted" or "thrash"
             is_read = bool(a.status & 0x08)
             is_fav = bool(a.status & 0x10)
+            guid = a.link if a.guid.startswith('hash:') else a.guid
             found_rows = c.execute('UPDATE ' + entry_table + ' SET is_read=%s, is_favorite=%s WHERE id_feed=%s AND guid=%s',
-                                   (is_read, is_fav, feed_id, uesc(a.guid)))
+                                   (is_read, is_fav, feed_id, uesc(guid)))
             if found_rows:
                 updates += 1
             else:
