@@ -133,8 +133,14 @@ def update_article_status(feedlist):
             is_read = bool(a.status & 0x08)
             is_fav = bool(a.status & 0x10)
             guid = a.link if a.guid.startswith('hash:') else a.guid
-            found_rows = c.execute('UPDATE ' + entry_table + ' SET date=%s, is_read=%s, is_favorite=%s WHERE id_feed=%s AND guid=%s',
-                                   (a.pubDate, is_read, is_fav, feed_id, uesc(guid)))
+            try:
+                # try to update id opportunistically so next step (fix_article_order) won't have to update the same row again
+                found_rows = c.execute('UPDATE ' + entry_table + ' SET id=%s*1000000+id%%1000000, date=%s, is_read=%s, is_favorite=%s WHERE id_feed=%s AND guid=%s',
+                                       (a.pubDate, a.pubDate, is_read, is_fav, feed_id, uesc(guid)))
+            except MySQLdb.IntegrityError:
+                # conflict with another row having the target ID value... leave it to be resolved in fix_article_order()
+                found_rows = c.execute('UPDATE ' + entry_table + ' SET date=%s, is_read=%s, is_favorite=%s WHERE id_feed=%s AND guid=%s',
+                                       (a.pubDate, is_read, is_fav, feed_id, uesc(guid)))
             if found_rows:
                 updates += 1
             else:
