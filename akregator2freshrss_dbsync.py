@@ -175,14 +175,69 @@ def update_article_status(feedlist):
     return fails
 
 
+def fix_article_order():
+    """Changes article ID values in order to make FreshRSS display them chronologically in category/mainstream view."""
+    c = frdb.cursor()
+    entry_table = frdb_table_prefix + 'entry'
+    updates, fails = 0, 0
+
+    # get what needs to be changed
+    c.execute('SELECT id, date FROM ' + entry_table + ' WHERE id NOT BETWEEN date*1000000 AND ((date+1)*1000000)-1')
+    oldidmap = {row[0]: row[1] for row in c}   # id -> date
+    print("Order fix: {} entries require ID update".format(len(oldidmap)))
+
+    # calculate new IDs
+    idremap = {}  # newid -> oldid
+    for oldid, date in oldidmap.iteritems():
+        for i in xrange(1000000):
+            newid = date * 1000000 + (oldid + i) % 1000000
+            # for simplicity we require that new id is not yet taken at all
+            # (so we don't have to resolve cascade/circular updates when for example
+            # we do old1->new1 and old2->new2, but it happens that new1==old2 or maybe
+            # even worse new1==old2 and new2==old1)
+            if newid not in oldidmap and newid not in idremap:
+                # success; not conflicting new ID found
+                idremap[newid] = oldid
+                break
+        else:
+            # very unlikely, but all IDs taken?
+            print("ERROR: failed to generate new ID for id={} date={}: all possible IDs taken".format(oldid, date))
+            fails += 1
+
+    # push changes to DB
+    for i, (newid, oldid) in enumerate(idremap.iteritems(), start=1):
+        found_rows = c.execute('UPDATE ' + entry_table + ' SET id=%s WHERE id=%s', (newid, oldid))
+        if found_rows:
+            updates += 1
+        else:
+            # WTF?
+            print("ERROR: failed to update ID {} -> {}: row not found (have you stopped FreshRSS updater?)".format(oldid, newid))
+            fails += 1
+
+        # commit and print status once a while
+        if (i % 1000) == 0:
+            frdb.commit()
+            print("Updated {:6d} article IDs  ({:.2f}% done)".format(i, 100.0 * i / len(idremap)))
+
+    c.close()
+    frdb.commit()
+    print("Article order updated; {} article IDs changed, {} failed".format(updates, fails))
+    return fails
+
+
 def main():
     fails = 0
-    opml = read_feeds_opml()
-    feedlist = extract_feed_nodes(opml)
+    if len(sys.argv) < 2 or sys.argv[1] != 'order-only':
+        opml = read_feeds_opml()
+        feedlist = extract_feed_nodes(opml)
 
-    fails += update_feed_settings(feedlist)
-    print("-" * 80)
-    fails += update_article_status(feedlist)
+        fails += update_feed_settings(feedlist)
+        print("-" * 80)
+
+        fails += update_article_status(feedlist)
+        print("-" * 80)
+
+    fails += fix_article_order()
 
     print("-" * 80)
     if fails:
