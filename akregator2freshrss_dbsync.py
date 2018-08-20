@@ -116,7 +116,7 @@ def update_article_status(feedlist):
     c = frdb.cursor()
     entry_table = frdb_table_prefix + 'entry'
     feed_table = frdb_table_prefix + 'feed'
-    fail_count = 0
+    updates, fails = 0, 0
 
     def update_feed_articles(outline, feed_id):
         articles = []
@@ -159,18 +159,20 @@ def update_article_status(feedlist):
                 row = c.fetchone()
                 if not row:
                     print(u"ERROR: feed '{}' ({}) not found in FreshRSS database".format(outline.get('title'), outline.get('xmlUrl')))
-                    fail_count += 1
+                    fails += 1
                     continue
 
             feed_id = row[0]
             stats = update_feed_articles(outline, feed_id)
-            fail_count += stats[1]
+            updates += stats[0]
+            fails += stats[1]
             c.execute('UPDATE ' + feed_table + ' SET cache_nbUnreads=%s WHERE id=%s', (stats[2], feed_id))
             frdb.commit()
 
     c.close()
     frdb.commit()
-    return fail_count
+    print("Article status updated; {} articles updated, {} articles failed".format(updates, fails))
+    return fails
 
 
 def main():
