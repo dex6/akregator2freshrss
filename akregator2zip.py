@@ -17,6 +17,7 @@ import zipfile
 from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime
+from HTMLParser import HTMLParser
 
 from lxml import etree as et
 
@@ -40,9 +41,11 @@ def u(s):
         s = s.decode('utf-8')
     return s
 
+_parser = HTMLParser()
+
 def uesc(s):
     """Returns unicode basic-HTML-escaped string."""
-    return u(cgi.escape(s, True))
+    return u(cgi.escape(_parser.unescape(u(s)), True))
 
 
 def read_feeds_opml():
