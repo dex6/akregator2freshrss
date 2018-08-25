@@ -45,7 +45,9 @@ _parser = HTMLParser()
 
 def uesc(s):
     """Returns unicode basic-HTML-escaped string."""
-    return u(cgi.escape(_parser.unescape(u(s)), True))
+    # some feeds have already double escaped entities... stuff like &amp;#8220;
+    # hence two unescapes
+    return u(cgi.escape(_parser.unescape(_parser.unescape(u(s))), True))
 
 
 def read_feeds_opml():
